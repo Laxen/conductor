@@ -2,7 +2,7 @@ from collections.abc import Callable
 import logging
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from settings import get_env
 
 
@@ -40,6 +40,22 @@ class TelegramIntegration:
                 await update.message.reply_text(reply)
 
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+
+    def on_command(self, command: str, callback: Callable[[], str | None]) -> None:
+        async def _handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if update.effective_user is None or update.message is None:
+                return
+
+            user_id = update.effective_user.id
+            if user_id not in self.allowed_user_ids:
+                logger.warning("Rejected command from non-whitelisted user %s", user_id)
+                return
+
+            reply = callback()
+            if reply:
+                await update.message.reply_text(reply)
+
+        self.application.add_handler(CommandHandler(command, _handle_command))
 
     def start(self) -> None:
         logger.info("Starting Telegram bot (polling)")
