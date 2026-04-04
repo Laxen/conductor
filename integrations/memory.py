@@ -4,7 +4,7 @@ import math
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass
 
 from integrations.openai import OpenAIIntegration
@@ -165,6 +165,14 @@ class MemoryStore:
             rows = c.execute("SELECT DISTINCT tag FROM memories WHERE tag IS NOT NULL").fetchall()
         return [r["tag"] for r in rows]
 
+    def get_overdue(self, today: str) -> list[Memory]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date < ? ORDER BY due_date ASC",
+                (today,),
+            ).fetchall()
+        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+
     def delete_by_tag(self, tag: str) -> int:
         with self._conn() as c:
             cursor = c.execute("DELETE FROM memories WHERE tag = ?", (tag,))
@@ -258,6 +266,32 @@ class MemoryApp:
 
         lines = [f"[{m.id}] {m.raw_text}{m.metadata.display()}" for m in all_memories]
         return "Memory DB:\n" + "\n".join(lines)
+
+    def handle_schedule(self) -> str:
+        today = date.today()
+        today_str = today.isoformat()
+
+        sections: list[str] = []
+
+        overdue = self.store.get_overdue(today_str)
+        if overdue:
+            lines = [f"• {m.raw_text}{m.metadata.display()}" for m in overdue]
+            sections.append("Overdue\n" + "\n".join(lines))
+
+        day_labels = ["Today", "Tomorrow"] + [
+            (today + timedelta(days=i)).strftime("%A") for i in range(2, 8)
+        ]
+        for i, label in enumerate(day_labels):
+            day_str = (today + timedelta(days=i)).isoformat()
+            entries = self.store.get_by_date_range(day_str, day_str)
+            if entries:
+                lines = [f"• {m.raw_text}{m.metadata.display()}" for m in entries]
+                sections.append(f"{label}\n" + "\n".join(lines))
+
+        if not sections:
+            return "No entries scheduled."
+
+        return "\n\n".join(sections)
 
     def _resolve_target(self, top_memories: list[Memory], intent_response: dict) -> Memory:
         if not top_memories:
