@@ -29,6 +29,7 @@ def main():
 
     telegram.on_message(on_message)
     telegram.on_command("showdb", "Show all memories in the database", app.handle_showdb)
+    telegram.on_command("schedule", "Show upcoming schedule", app.handle_schedule)
     telegram.start()
 
 
