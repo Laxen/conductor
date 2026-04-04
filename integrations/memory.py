@@ -275,7 +275,7 @@ class MemoryApp:
 
         overdue = self.store.get_overdue(today_str)
         if overdue:
-            lines = [self._schedule_line(m) for m in overdue]
+            lines = [f"• {m.raw_text}{m.metadata.display()}" for m in overdue]
             sections.append("Overdue\n" + "\n".join(lines))
 
         day_labels = ["Today", "Tomorrow"] + [
@@ -285,23 +285,13 @@ class MemoryApp:
             day_str = (today + timedelta(days=i)).isoformat()
             entries = self.store.get_by_date_range(day_str, day_str)
             if entries:
-                lines = [self._schedule_line(m) for m in entries]
+                lines = [f"• {m.raw_text}{m.metadata.display()}" for m in entries]
                 sections.append(f"{label}\n" + "\n".join(lines))
 
         if not sections:
             return "No entries scheduled."
 
         return "\n\n".join(sections)
-
-    @staticmethod
-    def _schedule_line(m: Memory) -> str:
-        parts = []
-        if m.location:
-            parts.append(f"location: {m.location}")
-        if m.tag:
-            parts.append(f"tag: {m.tag}")
-        suffix = f" ({', '.join(parts)})" if parts else ""
-        return f"• {m.raw_text}{suffix}"
 
     def _resolve_target(self, top_memories: list[Memory], intent_response: dict) -> Memory:
         if not top_memories:
