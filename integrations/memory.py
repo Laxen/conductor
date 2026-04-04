@@ -208,9 +208,6 @@ class MemoryApp:
     def handle_input(self, text: str, username: str) -> str | None:
         logger.info("New input received")
 
-        if text.strip() == "!showdb":
-            return self._handle_showdb()
-
         try:
             query_embedding = self.openai.embed(text)
             top_memories = self.store.top_k(query_embedding)
@@ -254,7 +251,7 @@ class MemoryApp:
 
         return "\n\n".join(responses)
 
-    def _handle_showdb(self) -> str:
+    def handle_showdb(self) -> str:
         all_memories = self.store.get_all()
         if not all_memories:
             return "The memory DB is empty."

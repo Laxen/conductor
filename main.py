@@ -28,6 +28,7 @@ def main():
         return app.handle_input(text, username)
 
     telegram.on_message(on_message)
+    telegram.on_command("showdb", "Show all memories in the database", app.handle_showdb)
     telegram.start()
 
 
