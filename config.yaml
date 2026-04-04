@@ -1,0 +1,12 @@
+name: Conductor
+version: "1.0.0"
+slug: conductor
+description: Conductor
+startup: services
+boot: auto
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - i386
