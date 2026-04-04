@@ -132,6 +132,16 @@ class MemoryStore:
         rows = self._fetch_all_rows()
         return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
 
+    def get_by_value(self, value: str) -> list[Memory]:
+        """Return memories where any metadata field equals the given value."""
+        conditions = [f"{field} = ?" for field in _METADATA_FIELDS]
+        where = " OR ".join(conditions)
+        params = tuple(value for _ in _METADATA_FIELDS)
+        query = f"SELECT id, raw_text, due_date, location, tag FROM memories WHERE {where} ORDER BY created_at DESC"
+        with self._conn() as c:
+            rows = c.execute(query, params).fetchall()
+        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+
     def retrieve_by_metadata(self, metadata: Metadata) -> list[Memory]:
         conditions: list[str] = []
         params: list[str] = []
@@ -259,12 +269,18 @@ class MemoryApp:
 
         return "\n\n".join(responses)
 
-    def handle_showdb(self) -> str:
-        all_memories = self.store.get_all()
-        if not all_memories:
-            return "The memory DB is empty."
+    def handle_show(self, args: list[str]) -> str:
+        value = args[0] if args else None
 
-        lines = [f"[{m.id}] {m.raw_text}{m.metadata.display()}" for m in all_memories]
+        if value is not None:
+            memories = self.store.get_by_value(value)
+        else:
+            memories = self.store.get_all()
+
+        if not memories:
+            return f"No entries found for '{value}'." if value else "The memory DB is empty."
+
+        lines = [f"{m.raw_text}{m.metadata.display()}" for m in memories]
         return "Memory DB:\n" + "\n".join(lines)
 
     def handle_schedule(self) -> str:

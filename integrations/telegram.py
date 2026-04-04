@@ -42,7 +42,7 @@ class TelegramIntegration:
 
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
 
-    def on_command(self, command: str, description: str, callback: Callable[[], str | None]) -> None:
+    def on_command(self, command: str, description: str, callback: Callable[[list[str]], str | None]) -> None:
         async def _handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.effective_user is None or update.message is None:
                 return
@@ -52,7 +52,7 @@ class TelegramIntegration:
                 logger.warning("Rejected command from non-whitelisted user %s", user_id)
                 return
 
-            reply = callback()
+            reply = callback(list(context.args or []))
             if reply:
                 await update.message.reply_text(reply)
 
