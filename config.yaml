@@ -10,3 +10,19 @@ arch:
   - amd64
   - armv7
   - i386
+options:
+  log_level: "INFO"
+  openai_api_key: null
+  openai_chat_model: "gpt-5-mini"
+  openai_embedding_model: "text-embedding-3-small"
+  telegram_bot_token: null
+  telegram_user_whitelist: null
+schema:
+  log_level: "list(DEBUG|INFO|WARNING|ERROR)"
+  openai_api_key: password
+  openai_chat_model: str
+  openai_embedding_model: str
+  telegram_bot_token: password
+  telegram_user_whitelist: str
+  slack_bot_token: "password?"
+  slack_app_token: "password?"

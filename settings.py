@@ -1,15 +1,23 @@
+import json
 import logging
-import os
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+OPTIONS_PATH = "/data/options.json"
 
 APP_LOGGERS = ("__main__", "main", "settings", "integrations")
 
 
-def configure_logging(log_level: str = "DEBUG") -> None:
+def _load_options() -> dict:
+    try:
+        with open(OPTIONS_PATH) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+_options = _load_options()
+
+
+def configure_logging(log_level: str = "INFO") -> None:
     """Set up logging so only this project's modules use *log_level*.
 
     Third-party packages stay at WARNING.
@@ -27,7 +35,7 @@ def configure_logging(log_level: str = "DEBUG") -> None:
 
 
 def get_env(name: str) -> str:
-    value = os.getenv(name)
-    if value is None or not value.strip():
-        raise ValueError(f"Missing required environment variable: {name}")
-    return value
+    value = _options.get(name.lower())
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValueError(f"Missing required configuration option: {name}")
+    return str(value)
