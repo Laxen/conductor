@@ -283,7 +283,7 @@ class MemoryApp:
         lines = [f"{m.raw_text}{m.metadata.display()}" for m in memories]
         return "Memory DB:\n" + "\n".join(lines)
 
-    def handle_schedule(self) -> str:
+    def handle_schedule(self, args: list[str]) -> str:
         today = date.today()
         today_str = today.isoformat()
 
