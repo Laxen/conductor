@@ -64,6 +64,8 @@ class TelegramIntegration:
 
         async def _post_init(app):
             await app.bot.set_my_commands(self._commands)
+            for user_id in self.allowed_user_ids:
+                await app.bot.send_message(chat_id=user_id, text="Conductor started")
 
         self.application.post_init = _post_init
         self.application.run_polling()
