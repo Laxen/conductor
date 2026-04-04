@@ -132,6 +132,15 @@ class MemoryStore:
         rows = self._fetch_all_rows()
         return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
 
+    def get_by_field(self, field: str) -> list[Memory]:
+        """Return memories where the given metadata field is set. Returns empty list for unknown fields."""
+        if field not in _METADATA_FIELDS:
+            return []
+        query = f"SELECT id, raw_text, due_date, location, tag FROM memories WHERE {field} IS NOT NULL ORDER BY created_at DESC"
+        with self._conn() as c:
+            rows = c.execute(query).fetchall()
+        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+
     def retrieve_by_metadata(self, metadata: Metadata) -> list[Memory]:
         conditions: list[str] = []
         params: list[str] = []
@@ -251,12 +260,20 @@ class MemoryApp:
 
         return "\n\n".join(responses)
 
-    def handle_showdb(self) -> str:
-        all_memories = self.store.get_all()
-        if not all_memories:
-            return "The memory DB is empty."
+    def handle_show(self, args: list[str]) -> str:
+        field = args[0].lower() if args else None
 
-        lines = [f"[{m.id}] {m.raw_text}{m.metadata.display()}" for m in all_memories]
+        if field is not None:
+            if field not in _METADATA_FIELDS:
+                return f"Unknown field '{field}'. Valid fields: {', '.join(_METADATA_FIELDS)}."
+            memories = self.store.get_by_field(field)
+        else:
+            memories = self.store.get_all()
+
+        if not memories:
+            return f"No memories found with '{field}' set." if field else "The memory DB is empty."
+
+        lines = [f"{m.raw_text}{m.metadata.display()}" for m in memories]
         return "Memory DB:\n" + "\n".join(lines)
 
     def _resolve_target(self, top_memories: list[Memory], intent_response: dict) -> Memory:
