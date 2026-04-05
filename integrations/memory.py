@@ -254,7 +254,9 @@ class MemoryApp:
 
             for tc in tool_calls:
                 args = json.loads(tc.arguments)
+                logger.info("[tool_call] name=%s args=%s", tc.name, args)
                 result = self._execute_tool(tc.name, args)
+                logger.info("[tool_call] result=%s", result)
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
