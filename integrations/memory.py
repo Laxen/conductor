@@ -270,7 +270,7 @@ class MemoryApp:
         return "\n\n".join(responses)
 
     def handle_show(self, args: list[str]) -> str:
-        value = args[0] if args else None
+        value = " ".join(args) if args else None
 
         if value is not None:
             memories = self.store.get_by_value(value)
@@ -280,8 +280,8 @@ class MemoryApp:
         if not memories:
             return f"No entries found for '{value}'." if value else "The memory DB is empty."
 
-        lines = [f"{m.raw_text}{m.metadata.display()}" for m in memories]
-        return "Memory DB:\n" + "\n".join(lines)
+        lines = [f"• {m.raw_text}{m.metadata.display()}" for m in memories]
+        return "\n".join(lines)
 
     def handle_schedule(self, args: list[str]) -> str:
         today = date.today()
