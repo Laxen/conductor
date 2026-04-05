@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS memories (
 
 
 _METADATA_FIELDS = ("due_date", "location", "tag")
+_DATE_MIN = "0000-01-01"
+_DATE_MAX = "9999-12-31"
 
 
 @dataclass(frozen=True)
@@ -227,47 +229,157 @@ class MemoryApp:
         logger.info("New input received")
 
         try:
-            query_embedding = self.openai.embed(text)
-            top_memories = self.store.top_k(query_embedding)
             available_tags = self.store.get_unique_tags()
-            intent_responses = self.openai.extract_intent(text, top_memories, available_tags)
+            response = self.openai.run_tool_call(text, available_tags)
         except Exception:
             logger.exception("Failed to process incoming message")
             return "Sorry, something went wrong while processing your message."
 
-        responses: list[str] = []
-        for intent_response in intent_responses:
-            intent = intent_response.get("intent", "unknown")
-            metadata = Metadata.from_intent(intent_response)
-            normalized_text = intent_response.get("normalized_text")
-            current_top_memories = self.store.top_k(query_embedding)
+        tool_calls = [item for item in response.output if getattr(item, "type", None) == "function_call"]
 
-            if intent == "store":
-                responses.append(self._handle_store(text, query_embedding, normalized_text, metadata))
-                continue
+        if not tool_calls:
+            return response.output_text or "I couldn't determine what you'd like to do. Please try rephrasing."
 
-            if intent == "retrieve":
-                if metadata.has_any():
-                    memories = self.store.retrieve_by_metadata(metadata)
-                    responses.append(self._handle_retrieve(text, memories))
-                else:
-                    responses.append(self._handle_retrieve(text, current_top_memories))
-                continue
+        confirmation_parts: list[str] = []
+        get_entries_calls: list = []
+        get_entries_results: list[tuple[str, str]] = []
 
-            if intent == "update":
-                responses.append(self._handle_update(text, query_embedding, normalized_text, metadata, current_top_memories, intent_response))
-                continue
+        for tc in tool_calls:
+            name = tc.name
+            args = json.loads(tc.arguments)
 
-            if intent == "delete":
-                responses.append(self._handle_delete(current_top_memories, intent_response, metadata))
-                continue
+            if name == "add_entry":
+                confirmation_parts.append(self._tool_add_entry(args))
 
-            responses.append("I couldn't determine what you'd like to do. Please try rephrasing.")
+            elif name == "get_entries":
+                entries = self._tool_get_entries(args)
+                result_json = json.dumps([m.to_dict() for m in entries])
+                get_entries_calls.append(tc)
+                get_entries_results.append((tc.call_id, result_json))
 
-        if not responses:
-            return "I couldn't determine what you'd like to do. Please try rephrasing."
+            elif name == "update_entry":
+                confirmation_parts.append(self._tool_update_entry(args))
 
-        return "\n\n".join(responses)
+            elif name == "delete_entry":
+                confirmation_parts.append(self._tool_delete_entry(args))
+
+        if get_entries_calls:
+            try:
+                answer = self.openai.answer_with_tool_results(
+                    text,
+                    get_entries_calls,
+                    get_entries_results,
+                )
+                confirmation_parts.append(answer)
+            except Exception:
+                logger.exception("Failed to process Turn 2 answer")
+                confirmation_parts.append("Sorry, I couldn't retrieve that right now.")
+
+        return "\n\n".join(confirmation_parts) if confirmation_parts else "Done."
+
+    def _tool_add_entry(self, args: dict) -> str:
+        try:
+            text = args.get("text", "")
+            metadata = Metadata(
+                due_date=args.get("due_date"),
+                location=args.get("location"),
+                tag=args.get("tag"),
+            )
+            embedding = self.openai.embed(text)
+            self.store.insert(text, metadata, embedding)
+            return f'Store\n"{text}"{metadata.display()}.'
+        except Exception:
+            logger.exception("add_entry tool failed")
+            return "Sorry, I couldn't store that right now."
+
+    def _tool_get_entries(self, args: dict) -> list[Memory]:
+        try:
+            text = args.get("text")
+            due_date_start = args.get("due_date_start")
+            due_date_end = args.get("due_date_end")
+            location = args.get("location")
+            tag = args.get("tag")
+
+            id_sets: list[set[str]] = []
+            all_results: dict[str, Memory] = {}
+
+            if due_date_start or due_date_end:
+                start = due_date_start or _DATE_MIN
+                end = due_date_end or _DATE_MAX
+                memories = self.store.get_by_date_range(start, end)
+                id_sets.append({m.id for m in memories})
+                all_results.update({m.id: m for m in memories})
+
+            if location or tag:
+                meta_filter = Metadata(location=location, tag=tag)
+                memories = self.store.retrieve_by_metadata(meta_filter)
+                id_sets.append({m.id for m in memories})
+                all_results.update({m.id: m for m in memories})
+
+            if text:
+                embedding = self.openai.embed(text)
+                memories = self.store.top_k(embedding)
+                id_sets.append({m.id for m in memories})
+                all_results.update({m.id: m for m in memories})
+
+            if not id_sets:
+                return self.store.get_all()
+
+            result_ids = set.intersection(*id_sets)
+            return [all_results[mid] for mid in result_ids if mid in all_results]
+        except Exception:
+            logger.exception("get_entries tool failed")
+            return []
+
+    def _tool_update_entry(self, args: dict) -> str:
+        try:
+            text = args.get("text", "")
+            new_text = args.get("new_text", "")
+            metadata = Metadata(
+                due_date=args.get("due_date"),
+                location=args.get("location"),
+                tag=args.get("tag"),
+            )
+            embedding = self.openai.embed(text)
+            top = self.store.top_k(embedding, k=1)
+            if not top:
+                return "I couldn't find that memory to update."
+            target = top[0]
+            new_embedding = self.openai.embed(new_text)
+            updated = self.store.update(target.id, new_text, metadata, new_embedding)
+            if not updated:
+                return "I couldn't find that memory to update."
+            return f'Update\n"{target.raw_text}"{target.metadata.display()}\nto\n"{new_text}"{metadata.display()}.'
+        except Exception:
+            logger.exception("update_entry tool failed")
+            return "Sorry, I couldn't update that right now."
+
+    def _tool_delete_entry(self, args: dict) -> str:
+        try:
+            text = args.get("text")
+            tag = args.get("tag")
+
+            if tag and not text:
+                count = self.store.delete_by_tag(tag)
+                if count == 0:
+                    return f'No memories found with tag "{tag}".'
+                return f'Deleted {count} memory/memories with tag "{tag}".'
+
+            if text:
+                embedding = self.openai.embed(text)
+                top = self.store.top_k(embedding, k=1)
+                if not top:
+                    return "I couldn't find that memory to delete."
+                target = top[0]
+                deleted = self.store.delete(target.id)
+                if not deleted:
+                    return "I couldn't find that memory to delete."
+                return f'Delete\n"{target.raw_text}"{target.metadata.display()}.'
+
+            return "Please provide either text or a tag to identify the entry to delete."
+        except Exception:
+            logger.exception("delete_entry tool failed")
+            return "Sorry, I couldn't delete that right now."
 
     def handle_show(self, args: list[str]) -> str:
         value = " ".join(args) if args else None
@@ -308,89 +420,3 @@ class MemoryApp:
             return "No entries scheduled."
 
         return "\n\n".join(sections)
-
-    def _resolve_target(self, top_memories: list[Memory], intent_response: dict) -> Memory:
-        if not top_memories:
-            raise ValueError("No memories available to target")
-
-        candidate = intent_response.get("target_id")
-        if isinstance(candidate, str) and candidate:
-            for item in top_memories:
-                if item.id == candidate:
-                    return item
-            raise ValueError(f"Target ID {candidate} not found in top memories")
-        raise ValueError("No target_id specified")
-
-    def _prepare_content_and_embedding(
-        self,
-        original_text: str,
-        query_embedding: list[float],
-        normalized_text: object,
-    ) -> tuple[str, list[float]]:
-        if isinstance(normalized_text, str) and normalized_text.strip():
-            content = normalized_text
-        else:
-            content = original_text
-
-        embedding = query_embedding if content == original_text else self.openai.embed(content)
-        return content, embedding
-
-    def _handle_store(self, text: str, query_embedding: list[float], normalized_text: object, metadata: Metadata) -> str:
-        try:
-            content, embedding = self._prepare_content_and_embedding(text, query_embedding, normalized_text)
-            self.store.insert(content, metadata, embedding)
-            return f"Store\n\"{content}\"{metadata.display()}."
-        except Exception:
-            logger.exception("Store failed")
-            return "Sorry, I couldn't store that right now."
-
-    def _handle_retrieve(self, text: str, top_memories: list[Memory]) -> str:
-        try:
-            if not top_memories:
-                return "I don't have anything stored yet."
-
-            contexts = [m.to_dict() for m in top_memories]
-            return self.openai.answer_with_context(text, contexts)
-        except Exception:
-            logger.exception("Retrieve failed")
-            return "Sorry, I couldn't retrieve that right now."
-
-    def _handle_update(
-        self, text: str, query_embedding: list[float], normalized_text: object,
-        metadata: Metadata, top_memories: list[Memory], intent_response: dict,
-    ) -> str:
-        try:
-            target = self._resolve_target(top_memories, intent_response)
-            content, embedding = self._prepare_content_and_embedding(text, query_embedding, normalized_text)
-            updated = self.store.update(target.id, content, metadata, embedding)
-            if not updated:
-                return "I couldn't find that memory to update."
-
-            return f"Update\n\"{target.raw_text}\"{target.metadata.display()}\nto\n\"{content}\"{metadata.display()}."
-        except ValueError as error:
-            logger.error("Update target resolution failed: %s", error)
-            return f"I couldn't update: {error}"
-        except Exception:
-            logger.exception("Update failed")
-            return "Sorry, I couldn't update that right now."
-
-    def _handle_delete(self, top_memories: list[Memory], intent_response: dict, metadata: Metadata) -> str:
-        try:
-            if metadata.tag and not intent_response.get("target_id"):
-                count = self.store.delete_by_tag(metadata.tag)
-                if count == 0:
-                    return f"No memories found with tag \"{metadata.tag}\"."
-                return f"Deleted {count} memory/memories with tag \"{metadata.tag}\"."
-
-            target = self._resolve_target(top_memories, intent_response)
-            deleted = self.store.delete(target.id)
-            if not deleted:
-                return "I couldn't find that memory to delete."
-
-            return f"Delete\n\"{target.raw_text}\"{target.metadata.display()}."
-        except ValueError as error:
-            logger.error("Delete target resolution failed: %s", error)
-            return f"I couldn't delete: {error}"
-        except Exception:
-            logger.exception("Delete failed")
-            return "Sorry, I couldn't delete that right now."

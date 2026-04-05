@@ -44,68 +44,160 @@ class OpenAIIntegration:
 
         return response.output_text
 
-    def extract_intent(self, text: str, top_memories: list, available_tags: list[str] | None = None) -> list[dict]:
-        now = datetime.now().astimezone()
+    def _build_tools(self, available_tags: list[str] | None = None) -> list[dict]:
+        tag_desc = "Tag/category for the entry (optional)."
+        if available_tags:
+            tag_desc += f" Known tags: {', '.join(available_tags)}."
 
-        memories_json = json.dumps([m.to_dict() for m in top_memories])
-        
-        prompt = (
-            "You are an assistant managing a memory-base for a user. Your task is to extract the user's intent from their message. "
-            "Reply with newline-delimited JSON only and no extra text. "
-            "Each line must be one valid JSON object with this shape: {\"intent\": \"intent\", \"due_date\": \"YYYY-MM-DD or null\", \"location\": \"string or null\", \"tag\": \"string or null\", \"target_id\": \"string or null\", \"normalized_text\": \"string or null\"}. "
-            "Return one line per action in the user's message, in user order. "
-            "If the user asks for multiple actions, return multiple lines. "
-            "The intent can be one of the following: "
-            "\"store\" when the user inputs a fact/todo/reminder/event, "
-            "\"retrieve\" when the user is asking a question, "
-            "\"update\" when the user wants to modify an existing stored memory, "
-            "\"delete\" when the user wants to remove an existing stored memory, "
-            "\"unknown\" otherwise. "
-            "intent is always required on every line. All other fields are optional unless stated below. "
-            "When the intent is \"update\", target_id is required and must be one of the IDs from the top memories. "
-            "When the intent is \"delete\", either target_id (one of the IDs from the top memories) or tag is required. Use tag without target_id when the user wants to delete all memories with that tag. "
-            "When the intent is \"update\", normalized_text must be the final canonical form of the memory, with transitional or conversational words removed. Don't include the date in the text. "
-            "location should be set only when the message explicitly implies a location context, otherwise null. "
-            "tag should be set when the user explicitly mentions or implies a category or tag for the memory, otherwise null. "
-            "For retrieve and delete intents, tag must be one of the available tags if provided. For store intent, tag can be a new value. "
-            # "When not applicable, location, target_id and normalized_text should be null. "
-            "due_date is set only when the message implies a deadline or date, otherwise null. "
-            "due_date should be calculated deterministically from the given reference date, interpreting relative date phrases like 'tomorrow' and weekdays like 'on Thursday' accordingly. Never guess. "
-            "\n\n"
-            f"Reference date: {now.date()} ({now.strftime('%A')})\n"
-            f"Available tags: {json.dumps(available_tags or [])}\n"
-            f"Top memories: {memories_json}\n"
-            f"User message: {text}"
+        return [
+            {
+                "type": "function",
+                "name": "add_entry",
+                "description": "Add a new entry to the memory store.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "The text content of the entry."},
+                        "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format (optional)."},
+                        "location": {"type": "string", "description": "Location associated with the entry (optional)."},
+                        "tag": {"type": "string", "description": tag_desc},
+                    },
+                    "required": ["text"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "get_entries",
+                "description": (
+                    "Retrieve entries from the memory store. "
+                    "Use metadata filters (due_date range, location, tag) for structured queries, "
+                    "or the text field for free-text semantic/vector search. "
+                    "Multiple filters are combined with AND."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Free text query for semantic similarity search (optional)."},
+                        "due_date_start": {"type": "string", "description": "Start of due date range in YYYY-MM-DD format (optional)."},
+                        "due_date_end": {"type": "string", "description": "End of due date range in YYYY-MM-DD format (optional)."},
+                        "location": {"type": "string", "description": "Filter by location (optional)."},
+                        "tag": {"type": "string", "description": "Filter by tag/category (optional)."},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "name": "update_entry",
+                "description": (
+                    "Update an existing entry in the memory store. "
+                    "The text field is used to find the entry via semantic search. "
+                    "new_text is the updated content; provide all metadata fields in their final state."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Text to search for the entry to update (semantic search)."},
+                        "new_text": {"type": "string", "description": "The new text content for the entry."},
+                        "due_date": {"type": "string", "description": "New due date in YYYY-MM-DD format (optional)."},
+                        "location": {"type": "string", "description": "New location (optional)."},
+                        "tag": {"type": "string", "description": "New tag/category (optional)."},
+                    },
+                    "required": ["text", "new_text"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "delete_entry",
+                "description": (
+                    "Delete an entry from the memory store. "
+                    "Provide text for semantic search to delete a single matching entry, "
+                    "or tag to delete all entries with that tag."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Text to find the entry to delete via semantic search (optional)."},
+                        "tag": {"type": "string", "description": "Delete all entries with this tag (optional)."},
+                    },
+                },
+            },
+        ]
+
+    def run_tool_call(self, text: str, available_tags: list[str] | None = None) -> object:
+        """Turn 1: call the LLM with tools and return the raw response."""
+        now = datetime.now().astimezone()
+        tools = self._build_tools(available_tags)
+        instructions = (
+            "You are an assistant managing a memory-base for a user. "
+            "Use the available tools to fulfil the user's request. "
+            f"Reference date: {now.date()} ({now.strftime('%A')})."
         )
 
-        output = self.send_prompt(prompt, model=self.intent_model, step="intent")
-        try:
-            intents: list[dict] = []
-            rows = [line.strip() for line in output.splitlines() if line.strip()]
+        logger.info("[LLM][tool_call][request] model=%s\ninput=%s", self.intent_model, text)
 
-            for row in rows:
-                payload = json.loads(row)
-                if not isinstance(payload, dict):
-                    raise ValueError("Each output row must be a JSON object")
+        response = self.client.responses.create(
+            model=self.intent_model,
+            instructions=instructions,
+            input=[{"role": "user", "content": text}],
+            tools=tools,
+        )
 
-                intents.append(
-                    {
-                        "intent": payload.get("intent", "unknown"),
-                        "due_date": payload.get("due_date"),
-                        "location": payload.get("location"),
-                        "tag": payload.get("tag"),
-                        "target_id": payload.get("target_id"),
-                        "normalized_text": payload.get("normalized_text"),
-                    }
-                )
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", None) if usage else None
+        output_tokens = getattr(usage, "output_tokens", None) if usage else None
+        logger.info(
+            "[LLM][tool_call][response] model=%s input_tokens=%s output_tokens=%s\noutput=%s",
+            self.intent_model,
+            input_tokens,
+            output_tokens,
+            response.output,
+        )
 
-            if not intents:
-                return [{"intent": "unknown", "due_date": None, "location": None, "tag": None, "target_id": None, "normalized_text": None}]
+        return response
 
-            return intents
-        except Exception:
-            logger.exception("Intent extraction failed. Raw output:\n%s", output)
-            raise
+    def answer_with_tool_results(
+        self,
+        original_query: str,
+        get_entries_calls: list,
+        tool_results: list[tuple[str, str]],
+    ) -> str:
+        """Turn 2: answer the user's query using get_entries results. No tools are provided."""
+        now = datetime.now().astimezone()
+        instructions = (
+            "You are an assistant managing a memory-base for a user. "
+            "Use ONLY the provided data to answer the user's original question. "
+            f"Reference date: {now.date()} ({now.strftime('%A')})."
+        )
+
+        input_items: list = [
+            {"role": "user", "content": original_query},
+            *get_entries_calls,
+            *[
+                {"type": "function_call_output", "call_id": call_id, "output": output}
+                for call_id, output in tool_results
+            ],
+        ]
+
+        logger.info("[LLM][answer][request] model=%s\ninput=%s", self.intent_model, original_query)
+
+        response = self.client.responses.create(
+            model=self.intent_model,
+            instructions=instructions,
+            input=input_items,
+        )
+
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", None) if usage else None
+        output_tokens = getattr(usage, "output_tokens", None) if usage else None
+        logger.info(
+            "[LLM][answer][response] model=%s input_tokens=%s output_tokens=%s\noutput=%s",
+            self.intent_model,
+            input_tokens,
+            output_tokens,
+            response.output_text,
+        )
+
+        return response.output_text
 
     def embed(self, text: str) -> list[float]:
         logger.info("[LLM][embed][request] model=%s\ninput=%s", self.embedding_model, text)
@@ -121,22 +213,6 @@ class OpenAIIntegration:
         )
 
         return embedding
-
-    def answer_with_context(self, query: str, contexts: list) -> str:
-        ctx = json.dumps(contexts)
-        now = datetime.now().astimezone()
-        
-        prompt = (
-            "You are an assistant managing a memory-base for a user. Your task is to answer the user's message using ONLY the information provided below. "
-            "Use all of the data if needed to give a complete answer. "
-            "\n\n"
-            f"Reference date: {now.date()} ({now.strftime('%A')})\n"
-            f"Data: {ctx}\n"
-            f"User message: {query}"
-        )
-
-        output = self.send_prompt(prompt, model=self.intent_model, step="reasoning")
-        return output
 
     def summarize_briefing(self, memories: list[dict], reference_date: str, reference_day: str) -> str:
         data = json.dumps(memories)
