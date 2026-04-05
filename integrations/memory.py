@@ -260,7 +260,7 @@ class MemoryApp:
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
-        return "Sorry, I wasn't able to complete your request — it required too many steps. Please try rephrasing or breaking it into smaller parts."
+        return "Execution stopped due to max number of iterations reached."
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":
