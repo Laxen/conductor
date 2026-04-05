@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS memories (
 _METADATA_FIELDS = ("due_date", "location", "tag")
 _DATE_MIN = "0000-01-01"
 _DATE_MAX = "9999-12-31"
-_MAX_AGENTIC_LOOPS = 3
+_MAX_AGENTIC_LOOPS = 6
 
 
 @dataclass(frozen=True)
@@ -260,7 +260,7 @@ class MemoryApp:
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
-        return last_response.output_text if last_response else "Sorry, the operation took too many steps."
+        return "Sorry, I wasn't able to complete your request — it required too many steps. Please try rephrasing or breaking it into smaller parts."
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":

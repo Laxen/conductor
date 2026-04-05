@@ -27,7 +27,7 @@ def configure_logging(log_level: str = "INFO") -> None:
 
     logging.basicConfig(
         level=logging.WARNING,
-        format="%(levelname)s:%(name)s:%(message)s",
+        format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
     )
 
     for name in APP_LOGGERS:
