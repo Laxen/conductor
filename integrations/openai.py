@@ -128,8 +128,9 @@ class OpenAIIntegration:
         now = datetime.now().astimezone()
         tools = self._build_tools(available_tags)
         instructions = (
-            "You are an assistant managing a memory-base for a user. "
-            "Use the available tools to fulfil the user's request. "
+            "You are an assistant managing a memory-base for a user, with entries being tasks, events or general information. "
+            "The user's request can manipulate (add, update, delete) or ask questions about the entries. "
+            "Use the available tools to fulfill the user's request. "
             "When you have finished all necessary actions, respond with a natural language summary. "
             f"Reference date: {now.date()} ({now.strftime('%A')})."
         )
