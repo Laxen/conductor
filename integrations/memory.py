@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS memories (
 _METADATA_FIELDS = ("due_date", "location", "tag")
 _DATE_MIN = "0000-01-01"
 _DATE_MAX = "9999-12-31"
+_MAX_AGENTIC_LOOPS = 3
 
 
 @dataclass(frozen=True)
@@ -230,52 +231,47 @@ class MemoryApp:
 
         try:
             available_tags = self.store.get_unique_tags()
-            response = self.openai.run_tool_call(text, available_tags)
         except Exception:
-            logger.exception("Failed to process incoming message")
+            logger.exception("Failed to fetch available tags")
             return "Sorry, something went wrong while processing your message."
 
-        tool_calls = [item for item in response.output if getattr(item, "type", None) == "function_call"]
+        conversation: list = [{"role": "user", "content": text}]
+        last_response = None
 
-        if not tool_calls:
-            return response.output_text or "I couldn't determine what you'd like to do. Please try rephrasing."
-
-        confirmation_parts: list[str] = []
-        get_entries_calls: list = []
-        get_entries_results: list[tuple[str, str]] = []
-
-        for tc in tool_calls:
-            name = tc.name
-            args = json.loads(tc.arguments)
-
-            if name == "add_entry":
-                confirmation_parts.append(self._tool_add_entry(args))
-
-            elif name == "get_entries":
-                entries = self._tool_get_entries(args)
-                result_json = json.dumps([m.to_dict() for m in entries])
-                get_entries_calls.append(tc)
-                get_entries_results.append((tc.call_id, result_json))
-
-            elif name == "update_entry":
-                confirmation_parts.append(self._tool_update_entry(args))
-
-            elif name == "delete_entry":
-                confirmation_parts.append(self._tool_delete_entry(args))
-
-        if get_entries_calls:
+        for loop_idx in range(_MAX_AGENTIC_LOOPS):
             try:
-                answer = self.openai.answer_with_tool_results(
-                    text,
-                    get_entries_calls,
-                    get_entries_results,
-                )
-                confirmation_parts.append(answer)
+                last_response = self.openai.call_with_tools(conversation, available_tags)
             except Exception:
-                logger.exception("Failed to process Turn 2 answer")
-                confirmation_parts.append("Sorry, I couldn't retrieve that right now.")
+                logger.exception("Failed to call LLM (loop %s)", loop_idx + 1)
+                return "Sorry, something went wrong while processing your message."
 
-        return "\n\n".join(confirmation_parts) if confirmation_parts else "Done."
+            conversation.extend(last_response.output)
+
+            tool_calls = [item for item in last_response.output if getattr(item, "type", None) == "function_call"]
+
+            if not tool_calls:
+                return last_response.output_text or "Done."
+
+            for tc in tool_calls:
+                args = json.loads(tc.arguments)
+                result = self._execute_tool(tc.name, args)
+                conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
+
+        logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
+        return last_response.output_text if last_response else "Sorry, the operation took too many steps."
+
+    def _execute_tool(self, name: str, args: dict) -> str:
+        if name == "add_entry":
+            return self._tool_add_entry(args)
+        if name == "get_entries":
+            entries = self._tool_get_entries(args)
+            return json.dumps([m.to_dict() for m in entries])
+        if name == "update_entry":
+            return self._tool_update_entry(args)
+        if name == "delete_entry":
+            return self._tool_delete_entry(args)
+        logger.error("Unknown tool called by LLM: %s", name)
+        return json.dumps({"error": f"Unknown tool: {name}"})
 
     def _tool_add_entry(self, args: dict) -> str:
         try:
@@ -287,10 +283,10 @@ class MemoryApp:
             )
             embedding = self.openai.embed(text)
             self.store.insert(text, metadata, embedding)
-            return f'Store\n"{text}"{metadata.display()}.'
+            return json.dumps({"status": "success", "text": text})
         except Exception:
             logger.exception("add_entry tool failed")
-            return "Sorry, I couldn't store that right now."
+            return json.dumps({"error": "Failed to store entry."})
 
     def _tool_get_entries(self, args: dict) -> list[Memory]:
         try:
@@ -300,86 +296,78 @@ class MemoryApp:
             location = args.get("location")
             tag = args.get("tag")
 
-            id_sets: list[set[str]] = []
+            result_ids: set[str] | None = None
             all_results: dict[str, Memory] = {}
 
             if due_date_start or due_date_end:
                 start = due_date_start or _DATE_MIN
                 end = due_date_end or _DATE_MAX
                 memories = self.store.get_by_date_range(start, end)
-                id_sets.append({m.id for m in memories})
+                ids = {m.id for m in memories}
+                result_ids = ids if result_ids is None else result_ids & ids
                 all_results.update({m.id: m for m in memories})
 
             if location or tag:
                 meta_filter = Metadata(location=location, tag=tag)
                 memories = self.store.retrieve_by_metadata(meta_filter)
-                id_sets.append({m.id for m in memories})
+                ids = {m.id for m in memories}
+                result_ids = ids if result_ids is None else result_ids & ids
                 all_results.update({m.id: m for m in memories})
 
             if text:
                 embedding = self.openai.embed(text)
                 memories = self.store.top_k(embedding)
-                id_sets.append({m.id for m in memories})
+                ids = {m.id for m in memories}
+                result_ids = ids if result_ids is None else result_ids & ids
                 all_results.update({m.id: m for m in memories})
 
-            if not id_sets:
-                return self.store.get_all()
+            if result_ids is None:
+                return []
 
-            result_ids = set.intersection(*id_sets)
-            return [all_results[mid] for mid in result_ids if mid in all_results]
+            return [all_results[mid] for mid in result_ids]
         except Exception:
             logger.exception("get_entries tool failed")
             return []
 
     def _tool_update_entry(self, args: dict) -> str:
         try:
-            text = args.get("text", "")
+            entry_id = args.get("id", "")
             new_text = args.get("new_text", "")
             metadata = Metadata(
                 due_date=args.get("due_date"),
                 location=args.get("location"),
                 tag=args.get("tag"),
             )
-            embedding = self.openai.embed(text)
-            top = self.store.top_k(embedding, k=1)
-            if not top:
-                return "I couldn't find that memory to update."
-            target = top[0]
             new_embedding = self.openai.embed(new_text)
-            updated = self.store.update(target.id, new_text, metadata, new_embedding)
+            updated = self.store.update(entry_id, new_text, metadata, new_embedding)
             if not updated:
-                return "I couldn't find that memory to update."
-            return f'Update\n"{target.raw_text}"{target.metadata.display()}\nto\n"{new_text}"{metadata.display()}.'
+                return json.dumps({"error": f"No entry found with id \"{entry_id}\"."})
+            return json.dumps({"status": "success", "id": entry_id, "new_text": new_text})
         except Exception:
             logger.exception("update_entry tool failed")
-            return "Sorry, I couldn't update that right now."
+            return json.dumps({"error": "Failed to update entry."})
 
     def _tool_delete_entry(self, args: dict) -> str:
         try:
-            text = args.get("text")
+            entry_id = args.get("id")
             tag = args.get("tag")
 
-            if tag and not text:
+            if tag and not entry_id:
                 count = self.store.delete_by_tag(tag)
                 if count == 0:
-                    return f'No memories found with tag "{tag}".'
-                return f'Deleted {count} memory/memories with tag "{tag}".'
+                    return json.dumps({"error": f"No entries found with tag \"{tag}\"."})
+                return json.dumps({"status": "success", "deleted_count": count, "tag": tag})
 
-            if text:
-                embedding = self.openai.embed(text)
-                top = self.store.top_k(embedding, k=1)
-                if not top:
-                    return "I couldn't find that memory to delete."
-                target = top[0]
-                deleted = self.store.delete(target.id)
+            if entry_id:
+                deleted = self.store.delete(entry_id)
                 if not deleted:
-                    return "I couldn't find that memory to delete."
-                return f'Delete\n"{target.raw_text}"{target.metadata.display()}.'
+                    return json.dumps({"error": f"No entry found with id \"{entry_id}\"."})
+                return json.dumps({"status": "success", "id": entry_id})
 
-            return "Please provide either text or a tag to identify the entry to delete."
+            return json.dumps({"error": "Provide either id or tag to identify entries to delete."})
         except Exception:
             logger.exception("delete_entry tool failed")
-            return "Sorry, I couldn't delete that right now."
+            return json.dumps({"error": "Failed to delete entry."})
 
     def handle_show(self, args: list[str]) -> str:
         value = " ".join(args) if args else None
