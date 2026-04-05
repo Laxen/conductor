@@ -4,7 +4,7 @@ import math
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass
 
 from integrations.openai import OpenAIIntegration
@@ -132,6 +132,16 @@ class MemoryStore:
         rows = self._fetch_all_rows()
         return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
 
+    def get_by_value(self, value: str) -> list[Memory]:
+        """Return memories where any metadata field equals the given value."""
+        conditions = [f"{field} = ?" for field in _METADATA_FIELDS]
+        where = " OR ".join(conditions)
+        params = tuple(value for _ in _METADATA_FIELDS)
+        query = f"SELECT id, raw_text, due_date, location, tag FROM memories WHERE {where} ORDER BY created_at DESC"
+        with self._conn() as c:
+            rows = c.execute(query, params).fetchall()
+        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+
     def retrieve_by_metadata(self, metadata: Metadata) -> list[Memory]:
         conditions: list[str] = []
         params: list[str] = []
@@ -164,6 +174,14 @@ class MemoryStore:
         with self._conn() as c:
             rows = c.execute("SELECT DISTINCT tag FROM memories WHERE tag IS NOT NULL").fetchall()
         return [r["tag"] for r in rows]
+
+    def get_overdue(self, today: str) -> list[Memory]:
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date < ? ORDER BY due_date ASC",
+                (today,),
+            ).fetchall()
+        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
 
     def delete_by_tag(self, tag: str) -> int:
         with self._conn() as c:
@@ -251,13 +269,45 @@ class MemoryApp:
 
         return "\n\n".join(responses)
 
-    def handle_showdb(self) -> str:
-        all_memories = self.store.get_all()
-        if not all_memories:
-            return "The memory DB is empty."
+    def handle_show(self, args: list[str]) -> str:
+        value = " ".join(args) if args else None
 
-        lines = [f"[{m.id}] {m.raw_text}{m.metadata.display()}" for m in all_memories]
-        return "Memory DB:\n" + "\n".join(lines)
+        if value is not None:
+            memories = self.store.get_by_value(value)
+        else:
+            memories = self.store.get_all()
+
+        if not memories:
+            return f"No entries found for '{value}'." if value else "The memory DB is empty."
+
+        lines = [f"• {m.raw_text}{m.metadata.display()}" for m in memories]
+        return "\n".join(lines)
+
+    def handle_schedule(self, args: list[str]) -> str:
+        today = date.today()
+        today_str = today.isoformat()
+
+        sections: list[str] = []
+
+        overdue = self.store.get_overdue(today_str)
+        if overdue:
+            lines = [f"• {m.raw_text}{m.metadata.display()}" for m in overdue]
+            sections.append("Overdue\n" + "\n".join(lines))
+
+        day_labels = ["Today", "Tomorrow"] + [
+            (today + timedelta(days=i)).strftime("%A") for i in range(2, 8)
+        ]
+        for i, label in enumerate(day_labels):
+            day_str = (today + timedelta(days=i)).isoformat()
+            entries = self.store.get_by_date_range(day_str, day_str)
+            if entries:
+                lines = [f"• {m.raw_text}{m.metadata.display()}" for m in entries]
+                sections.append(f"{label}\n" + "\n".join(lines))
+
+        if not sections:
+            return "No entries scheduled."
+
+        return "\n\n".join(sections)
 
     def _resolve_target(self, top_memories: list[Memory], intent_response: dict) -> Memory:
         if not top_memories:
