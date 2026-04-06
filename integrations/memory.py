@@ -289,11 +289,7 @@ class MemoryApp:
         if entry is None:
             return dict(args)
         extra_fields = {k: v for k, v in args.items() if k != "id"}
-        if tool_name == "update_entry":
-            return {"id": entry_id, "old_text": entry.raw_text, **extra_fields}
-        if tool_name == "delete_entry":
-            return {"id": entry_id, "text": entry.raw_text, **extra_fields}
-        return dict(args)
+        return {"id": entry_id, "text": entry.raw_text, **extra_fields}
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":
