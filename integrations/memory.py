@@ -179,10 +179,21 @@ class MemoryStore:
             rows = c.execute("SELECT DISTINCT tag FROM memories WHERE tag IS NOT NULL").fetchall()
         return [r["tag"] for r in rows]
 
+    def get_by_id(self, memory_id: str) -> Memory | None:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE id = ?",
+                (memory_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return Memory(id=row["id"], raw_text=row["raw_text"], due_date=row["due_date"], location=row["location"], tag=row["tag"])
+
     def get_overdue(self, today: str) -> list[Memory]:
+        # Exclude entries where due_date is NULL or an empty string, both meaning "no due date".
         with self._conn() as c:
             rows = c.execute(
-                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date < ? ORDER BY due_date ASC",
+                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date != '' AND due_date < ? ORDER BY due_date ASC",
                 (today,),
             ).fetchall()
         return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
@@ -258,7 +269,8 @@ class MemoryApp:
                 logger.info("[tool_call] name=%s args=%s", tc.name, args)
 
                 if tc.name in ("update_entry", "delete_entry") and confirm_fn is not None:
-                    if not confirm_fn(tc.name, args):
+                    confirm_args = self._build_confirm_args(tc.name, args)
+                    if not confirm_fn(tc.name, confirm_args):
                         return "Operation cancelled."
 
                 result = self._execute_tool(tc.name, args)
@@ -267,6 +279,21 @@ class MemoryApp:
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
         return "Execution stopped due to max number of iterations reached."
+
+    def _build_confirm_args(self, tool_name: str, args: dict) -> dict:
+        """Return a copy of args augmented with human-readable context for confirmation."""
+        entry_id = args.get("id")
+        if not entry_id:
+            return dict(args)
+        entry = self.store.get_by_id(entry_id)
+        if entry is None:
+            return dict(args)
+        extra_fields = {k: v for k, v in args.items() if k != "id"}
+        if tool_name == "update_entry":
+            return {"id": entry_id, "old_text": entry.raw_text, **extra_fields}
+        if tool_name == "delete_entry":
+            return {"id": entry_id, "text": entry.raw_text, **extra_fields}
+        return dict(args)
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":
