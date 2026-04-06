@@ -1,5 +1,5 @@
 name: Conductor
-version: "1.2.8"
+version: "1.2.9"
 slug: conductor
 description: Conductor
 startup: services
