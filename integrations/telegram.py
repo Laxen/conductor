@@ -53,7 +53,7 @@ class TelegramIntegration:
             int(uid.strip()) for uid in whitelist_raw.split(",") if uid.strip()
         }
 
-        self.application = ApplicationBuilder().token(bot_token).build()
+        self.application = ApplicationBuilder().token(bot_token).concurrent_updates(True).build()
         self._callback: Callable[[str, str, Callable[[str, dict], bool]], str | None] | None = None
         self._commands: list[BotCommand] = []
         self._pending_confirmations: dict[int, dict] = {}
