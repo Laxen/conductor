@@ -4,6 +4,7 @@ import math
 import os
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass
 
@@ -226,7 +227,7 @@ class MemoryApp:
         self.store = store
         self.openai = openai
 
-    def handle_input(self, text: str, username: str) -> str | None:
+    def handle_input(self, text: str, username: str, confirm_fn: Callable[[str, dict], bool] | None = None) -> str | None:
         logger.info("New input received")
 
         try:
@@ -255,6 +256,11 @@ class MemoryApp:
             for tc in tool_calls:
                 args = json.loads(tc.arguments)
                 logger.info("[tool_call] name=%s args=%s", tc.name, args)
+
+                if tc.name in ("update_entry", "delete_entry") and confirm_fn is not None:
+                    if not confirm_fn(tc.name, args):
+                        return "Operation cancelled."
+
                 result = self._execute_tool(tc.name, args)
                 logger.info("[tool_call] result=%s", result)
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
