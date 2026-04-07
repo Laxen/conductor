@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass
 
 from integrations.openai import OpenAIIntegration
+from integrations.prompt import PromptStore
 
 
 DB_PATH = "/data/memory.db"
@@ -238,9 +239,10 @@ class MemoryStore:
 class MemoryApp:
     """Handles memory management."""
 
-    def __init__(self, store: MemoryStore, openai: OpenAIIntegration):
+    def __init__(self, store: MemoryStore, openai: OpenAIIntegration, prompt_store: PromptStore):
         self.store = store
         self.openai = openai
+        self.prompt_store = prompt_store
 
     def handle_input(self, text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         logger.info("New input received")
@@ -251,12 +253,13 @@ class MemoryApp:
             logger.exception("Failed to fetch available tags")
             return "Sorry, something went wrong while processing your message."
 
+        instructions = self.prompt_store.load()
         conversation: list = [{"role": "user", "content": text}]
         last_response = None
 
         for loop_idx in range(_MAX_AGENTIC_LOOPS):
             try:
-                last_response = self.openai.call_with_tools(conversation, available_tags)
+                last_response = self.openai.call_with_tools(conversation, available_tags, instructions=instructions)
             except Exception:
                 logger.exception("Failed to call LLM (loop %s)", loop_idx + 1)
                 return "Sorry, something went wrong while processing your message."
