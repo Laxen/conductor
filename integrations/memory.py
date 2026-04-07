@@ -79,6 +79,10 @@ class Memory:
         }
 
 
+def _row_to_memory(r) -> "Memory":
+    return Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"])
+
+
 class MemoryStore:
     """Encapsulates all database operations for memories."""
 
@@ -134,7 +138,7 @@ class MemoryStore:
 
     def get_all(self) -> list[Memory]:
         rows = self._fetch_all_rows()
-        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+        return [_row_to_memory(r) for r in rows]
 
     def get_by_value(self, value: str) -> list[Memory]:
         """Return memories where any metadata field equals the given value."""
@@ -144,7 +148,7 @@ class MemoryStore:
         query = f"SELECT id, raw_text, due_date, location, tag FROM memories WHERE {where} ORDER BY created_at DESC"
         with self._conn() as c:
             rows = c.execute(query, params).fetchall()
-        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+        return [_row_to_memory(r) for r in rows]
 
     def retrieve_by_metadata(self, metadata: Metadata) -> list[Memory]:
         conditions: list[str] = []
@@ -164,7 +168,7 @@ class MemoryStore:
         with self._conn() as c:
             rows = c.execute(query, tuple(params)).fetchall()
 
-        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+        return [_row_to_memory(r) for r in rows]
 
     def get_by_date_range(self, start_date: str, end_date: str) -> list[Memory]:
         with self._conn() as c:
@@ -172,7 +176,7 @@ class MemoryStore:
                 "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date >= ? AND due_date <= ? ORDER BY due_date ASC",
                 (start_date, end_date),
             ).fetchall()
-        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+        return [_row_to_memory(r) for r in rows]
 
     def get_unique_tags(self) -> list[str]:
         with self._conn() as c:
@@ -187,7 +191,7 @@ class MemoryStore:
             ).fetchone()
         if row is None:
             return None
-        return Memory(id=row["id"], raw_text=row["raw_text"], due_date=row["due_date"], location=row["location"], tag=row["tag"])
+        return _row_to_memory(row)
 
     def get_overdue(self, today: str) -> list[Memory]:
         # Exclude entries where due_date is NULL or an empty string, both meaning "no due date".
@@ -196,7 +200,7 @@ class MemoryStore:
                 "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date != '' AND due_date < ? ORDER BY due_date ASC",
                 (today,),
             ).fetchall()
-        return [Memory(id=r["id"], raw_text=r["raw_text"], due_date=r["due_date"], location=r["location"], tag=r["tag"]) for r in rows]
+        return [_row_to_memory(r) for r in rows]
 
     def delete_by_tag(self, tag: str) -> int:
         with self._conn() as c:
@@ -238,7 +242,7 @@ class MemoryApp:
         self.store = store
         self.openai = openai
 
-    def handle_input(self, text: str, username: str, confirm_fn: Callable[[str, dict], bool] | None = None) -> str | None:
+    def handle_input(self, text: str) -> str | None:
         logger.info("New input received")
 
         try:
@@ -267,29 +271,12 @@ class MemoryApp:
             for tc in tool_calls:
                 args = json.loads(tc.arguments)
                 logger.info("[tool_call] name=%s args=%s", tc.name, args)
-
-                if tc.name in ("update_entry", "delete_entry") and confirm_fn is not None:
-                    confirm_args = self._build_confirm_args(tc.name, args)
-                    if not confirm_fn(tc.name, confirm_args):
-                        return "Operation cancelled."
-
                 result = self._execute_tool(tc.name, args)
                 logger.info("[tool_call] result=%s", result)
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
         return "Execution stopped due to max number of iterations reached."
-
-    def _build_confirm_args(self, tool_name: str, args: dict) -> dict:
-        """Return a copy of args augmented with human-readable context for confirmation."""
-        entry_id = args.get("id")
-        if not entry_id:
-            return dict(args)
-        entry = self.store.get_by_id(entry_id)
-        if entry is None:
-            return dict(args)
-        extra_fields = {k: v for k, v in args.items() if k != "id"}
-        return {"id": entry_id, "text": entry.raw_text, **extra_fields}
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":
