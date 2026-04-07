@@ -259,7 +259,7 @@ class MemoryApp:
 
         for loop_idx in range(_MAX_AGENTIC_LOOPS):
             try:
-                last_response = self.openai.call_with_tools(conversation, available_tags, instructions=instructions)
+                last_response = self.openai.call_with_tools(conversation, instructions, available_tags)
             except Exception:
                 logger.exception("Failed to call LLM (loop %s)", loop_idx + 1)
                 return "Sorry, something went wrong while processing your message."

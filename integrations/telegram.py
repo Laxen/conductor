@@ -164,7 +164,7 @@ class TelegramIntegration:
         self.application.add_handler(CommandHandler(command, _handle_command))
         self._commands.append(BotCommand(command, description))
 
-    def add_prompt_command(self, get_prompt: Callable[[], str], set_prompt: Callable[[str], None], reset_prompt: Callable[[], None]) -> None:
+    def add_prompt_command(self, get_prompt: Callable[[], str], set_prompt: Callable[[str], None]) -> None:
         """Register the /prompt command to view and edit the system prompt."""
         self._set_prompt = set_prompt
 
@@ -175,32 +175,13 @@ class TelegramIntegration:
                 return
 
             current = get_prompt()
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔄 Reset to default", callback_data="prompt:reset"),
-            ]])
             msg = await update.message.reply_text(
                 f"Current prompt:\n\n{_html.escape(current)}\n\n<i>Reply to this message to set a new prompt.</i>",
                 parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
             )
             self._prompt_message_id = msg.message_id
 
-        async def _handle_prompt_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            query = update.callback_query
-            if query is None or query.data != "prompt:reset":
-                return
-            await query.answer()
-            reset_prompt()
-            self._prompt_message_id = None
-            new_prompt = get_prompt()
-            if query.message:
-                await query.edit_message_text(
-                    f"Prompt reset to default:\n\n{_html.escape(new_prompt)}",
-                    parse_mode=ParseMode.HTML,
-                )
-
         self.application.add_handler(CommandHandler("prompt", _handle_prompt_command))
-        self.application.add_handler(CallbackQueryHandler(_handle_prompt_reset, pattern="^prompt:reset$"))
         self._commands.append(BotCommand("prompt", "View or edit the assistant prompt"))
 
     def start(self) -> None:
