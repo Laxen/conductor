@@ -8,6 +8,7 @@ from settings import get_env
 
 logger = logging.getLogger(__name__)
 
+
 class OpenAIIntegration:
     def __init__(self):
         api_key = get_env("OPENAI_API_KEY")
@@ -123,27 +124,17 @@ class OpenAIIntegration:
             },
         ]
 
-    def call_with_tools(self, conversation: list, available_tags: list[str] | None = None) -> object:
+    def call_with_tools(self, conversation: list, instructions: str, available_tags: list[str] | None = None) -> object:
         """Call the LLM with tools and the full conversation history. Returns the raw response."""
         now = datetime.now().astimezone()
         tools = self._build_tools(available_tags)
-        instructions = (
-            "You are an assistant managing a memory-base for a user, with entries being tasks, events or general information. "
-            "Use the available tools to fully understand the user's intention and fulfill their request. "
-            "If the user states a fact/task/reminder/event, check if there's already a closely matching entry that can be updated with that info, otherwise add a new one. "
-            "If the user says something is done/finished or checked off, get the entry they're talking about and delete it. "
-            "NEVER add extra text to an entry that the user didn't input. NEVER add metadata (date, location, tag, etc.) unless it's obvious from the user's message. "
-            "NEVER lie about what you've done or make things up, if you don't understand the user's request then tell them why. "
-            "Any relative date phrases like 'tomorrow' and weekdays like 'on Thursday' should be calculated deterministically from the given reference date. NEVER guess. "
-            "When you have finished all necessary actions, respond with a summary of what you've done. "
-            f"Reference date: {now.date()} ({now.strftime('%A')})."
-        )
+        full_instructions = instructions + f"\nReference date: {now.date()} ({now.strftime('%A')})."
 
         logger.info("[LLM][tool_call][request] model=%s\nconversation_length=%s", self.intent_model, len(conversation))
 
         response = self.client.responses.create(
             model=self.intent_model,
-            instructions=instructions,
+            instructions=full_instructions,
             input=conversation,
             tools=tools,
         )
