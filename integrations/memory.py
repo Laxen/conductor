@@ -242,7 +242,7 @@ class MemoryApp:
         self.store = store
         self.openai = openai
 
-    def handle_input(self, text: str) -> str | None:
+    def handle_input(self, text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         logger.info("New input received")
 
         try:
@@ -271,12 +271,29 @@ class MemoryApp:
             for tc in tool_calls:
                 args = json.loads(tc.arguments)
                 logger.info("[tool_call] name=%s args=%s", tc.name, args)
+
+                if tc.name in ("update_entry", "delete_entry"):
+                    confirm_args = self._build_confirm_args(tc.name, args)
+                    if not confirm_fn(tc.name, confirm_args):
+                        return "Operation cancelled."
+
                 result = self._execute_tool(tc.name, args)
                 logger.info("[tool_call] result=%s", result)
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
         return "Execution stopped due to max number of iterations reached."
+
+    def _build_confirm_args(self, tool_name: str, args: dict) -> dict:
+        """Return a copy of args augmented with human-readable context for confirmation."""
+        entry_id = args.get("id")
+        if not entry_id:
+            return dict(args)
+        entry = self.store.get_by_id(entry_id)
+        if entry is None:
+            return dict(args)
+        extra_fields = {k: v for k, v in args.items() if k != "id"}
+        return {"id": entry_id, "text": entry.raw_text, **extra_fields}
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "add_entry":
