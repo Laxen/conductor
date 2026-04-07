@@ -23,10 +23,10 @@ def main():
     app = MemoryApp(store, openai)
     briefing = BriefingFunction(store, openai)
 
-    def on_message(text: str, username: str, confirm_fn: Callable[[str, dict], bool] | None) -> str | None:
+    def on_message(text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         if text.strip().lower() == "brief":
             return briefing.execute()
-        return app.handle_input(text, username, confirm_fn)
+        return app.handle_input(text, confirm_fn)
 
     telegram.on_message(on_message)
     telegram.on_command("show", "Show memories in the database", app.handle_show)
