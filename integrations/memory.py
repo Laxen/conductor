@@ -256,6 +256,7 @@ class MemoryApp:
         instructions = self.prompt_store.load()
         conversation: list = [{"role": "user", "content": text}]
         last_response = None
+        executed_calls: list[str] = []
 
         for loop_idx in range(_MAX_AGENTIC_LOOPS):
             try:
@@ -269,7 +270,11 @@ class MemoryApp:
             tool_calls = [item for item in last_response.output if getattr(item, "type", None) == "function_call"]
 
             if not tool_calls:
-                return last_response.output_text or "Done."
+                final_text = last_response.output_text or "Done."
+                if executed_calls:
+                    calls_summary = "\n".join(executed_calls)
+                    final_text = f"{final_text}\n\n---\n{calls_summary}"
+                return final_text
 
             for tc in tool_calls:
                 args = json.loads(tc.arguments)
@@ -283,6 +288,9 @@ class MemoryApp:
                 result = self._execute_tool(tc.name, args)
                 logger.info("[tool_call] result=%s", result)
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
+
+                args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
+                executed_calls.append(f"{tc.name}({args_str})")
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
         return "Execution stopped due to max number of iterations reached."
