@@ -6,6 +6,7 @@ from integrations.memory import MemoryApp, MemoryStore
 from integrations.openai import OpenAIIntegration
 from integrations.prompt import PromptStore
 from integrations.telegram import TelegramIntegration
+from integrations.webhook import WebhookIntegration
 from settings import configure_logging, get_env
 
 
@@ -24,6 +25,10 @@ def main():
     prompt_store = PromptStore()
     app = MemoryApp(store, openai, prompt_store)
     briefing = BriefingFunction(store, openai)
+
+    webhook_port = int(get_env("WEBHOOK_PORT"))
+    webhook = WebhookIntegration(store, telegram.send_message, webhook_port)
+    telegram.add_startup_task(webhook.start)
 
     def on_message(text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         if text.strip().lower() == "brief":

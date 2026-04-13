@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 import asyncio
 import html as _html
 import logging
@@ -54,6 +54,8 @@ class TelegramIntegration:
         self._confirmation_result: bool = False
         self._prompt_message_id: int | None = None
         self._set_prompt: Callable[[str], None] | None = None
+
+        self._startup_tasks: list[Callable[[], Awaitable[None]]] = []
 
         self._setup_confirmation_handler()
 
@@ -184,12 +186,26 @@ class TelegramIntegration:
         self.application.add_handler(CommandHandler("prompt", _handle_prompt_command))
         self._commands.append(BotCommand("prompt", "View or edit the assistant prompt"))
 
+    def add_startup_task(self, coro_fn: Callable[[], Awaitable[None]]) -> None:
+        """Register a coroutine to run when the bot starts up."""
+        self._startup_tasks.append(coro_fn)
+
+    async def send_message(self, text: str) -> None:
+        """Send a message to the configured Telegram chat."""
+        await self.application.bot.send_message(
+            chat_id=self.chat_id,
+            text=_md_to_html(text),
+            parse_mode=ParseMode.HTML,
+        )
+
     def start(self) -> None:
         logger.info("Starting Telegram bot (polling)")
 
         async def _post_init(app):
             await app.bot.set_my_commands(self._commands)
             await app.bot.send_message(chat_id=self.chat_id, text="Conductor started")
+            for task in self._startup_tasks:
+                await task()
 
         self.application.post_init = _post_init
         self.application.run_polling()
