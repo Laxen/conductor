@@ -48,8 +48,5 @@ class WebhookIntegration:
         if memories:
             lines = [f"• {m.raw_text}{m.metadata.display()}" for m in memories]
             message = f"📍 {zone}\n" + "\n".join(lines)
-        else:
-            message = f"📍 {zone} — no entries found."
-
-        await self.send_fn(message)
+            await self.send_fn(message)
         return web.Response(text="OK")

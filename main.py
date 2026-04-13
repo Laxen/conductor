@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Callable
 
@@ -13,7 +14,7 @@ from settings import configure_logging, get_env
 logger = logging.getLogger(__name__)
 
 
-def main():
+async def main():
     log_level = get_env("LOG_LEVEL")
     configure_logging(log_level)
 
@@ -28,7 +29,7 @@ def main():
 
     webhook_port = int(get_env("WEBHOOK_PORT"))
     webhook = WebhookIntegration(store, telegram.send_message, webhook_port)
-    telegram.add_startup_task(webhook.start)
+    await webhook.start()
 
     def on_message(text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         if text.strip().lower() == "brief":
@@ -39,8 +40,8 @@ def main():
     telegram.on_command("show", "Show memories in the database", app.handle_show)
     telegram.on_command("schedule", "Show upcoming schedule", app.handle_schedule)
     telegram.add_prompt_command(prompt_store.load, prompt_store.save)
-    telegram.start()
+    await telegram.start()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
