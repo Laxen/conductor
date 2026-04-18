@@ -1,5 +1,5 @@
 name: Conductor
-version: "1.3.0"
+version: "1.3.1"
 slug: conductor
 description: Conductor
 startup: services
@@ -10,6 +10,10 @@ arch:
   - amd64
   - armv7
   - i386
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "Webhook for Home Assistant automations"
 options:
   log_level: "INFO"
   openai_api_key: null
@@ -17,6 +21,7 @@ options:
   openai_embedding_model: "text-embedding-3-small"
   telegram_bot_token: null
   telegram_chat_id: null
+  webhook_port: 8099
 schema:
   log_level: "list(DEBUG|INFO|WARNING|ERROR)"
   openai_api_key: password
@@ -24,3 +29,4 @@ schema:
   openai_embedding_model: str
   telegram_bot_token: password
   telegram_chat_id: int
+  webhook_port: int

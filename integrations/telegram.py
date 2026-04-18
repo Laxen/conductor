@@ -184,12 +184,19 @@ class TelegramIntegration:
         self.application.add_handler(CommandHandler("prompt", _handle_prompt_command))
         self._commands.append(BotCommand("prompt", "View or edit the assistant prompt"))
 
-    def start(self) -> None:
+    async def send_message(self, text: str) -> None:
+        """Send a message to the configured Telegram chat."""
+        await self.application.bot.send_message(
+            chat_id=self.chat_id,
+            text=_md_to_html(text),
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def start(self) -> None:
         logger.info("Starting Telegram bot (polling)")
-
-        async def _post_init(app):
-            await app.bot.set_my_commands(self._commands)
-            await app.bot.send_message(chat_id=self.chat_id, text="Conductor started")
-
-        self.application.post_init = _post_init
-        self.application.run_polling()
+        async with self.application:
+            await self.application.bot.set_my_commands(self._commands)
+            await self.send_message("Conductor started")
+            await self.application.updater.start_polling()
+            await self.application.start()
+            await asyncio.Event().wait()
