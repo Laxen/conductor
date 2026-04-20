@@ -78,7 +78,7 @@ class OpenAIIntegration:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string", "description": "Free text query for semantic similarity search, use only if you have no other way of filtering data (optional)."},
+                        "text": {"type": "string", "description": "Free text query for semantic similarity search. NEVER combine multiple unrelated strings in one call, instead prefer calling get_entries multiple times (optional)."},
                         "due_date_start": {"type": "string", "description": "Start of due date range in YYYY-MM-DD format (optional)."},
                         "due_date_end": {"type": "string", "description": "End of due date range in YYYY-MM-DD format (optional)."},
                         "location": {"type": "string", "description": "Filter by location (optional)."},
