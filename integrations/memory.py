@@ -256,13 +256,15 @@ class MemoryApp:
         instructions = self.prompt_store.load()
         conversation: list = [{"role": "user", "content": text}]
         last_response = None
-        executed_calls: list[str] = []
+        executed_calls: list[tuple[int, str]] = []
+        loops_run = 0
 
         for loop_idx in range(_MAX_AGENTIC_LOOPS):
+            loops_run = loop_idx + 1
             try:
                 last_response = self.openai.call_with_tools(conversation, instructions, available_tags)
             except Exception:
-                logger.exception("Failed to call LLM (loop %s)", loop_idx + 1)
+                logger.exception("Failed to call LLM (loop %s)", loops_run)
                 return "Sorry, something went wrong while processing your message."
 
             conversation.extend(last_response.output)
@@ -272,8 +274,15 @@ class MemoryApp:
             if not tool_calls:
                 final_text = last_response.output_text or "Done."
                 if executed_calls:
-                    calls_summary = "\n".join(executed_calls)
-                    final_text = f"{final_text}\n\n---\n{calls_summary}"
+                    loop_word = "loop" if loops_run == 1 else "loops"
+                    debug_lines = [f"🔄 {loops_run} {loop_word} run"]
+                    current_loop = None
+                    for call_loop, call_str in executed_calls:
+                        if call_loop != current_loop:
+                            current_loop = call_loop
+                            debug_lines.append(f"\nLoop {call_loop}:")
+                        debug_lines.append(f"  {call_str}")
+                    final_text = f"{final_text}\n\n>>>\n" + "\n".join(debug_lines) + "\n<<<"
                 return final_text
 
             for tc in tool_calls:
@@ -290,7 +299,7 @@ class MemoryApp:
                 conversation.append({"type": "function_call_output", "call_id": tc.call_id, "output": result})
 
                 args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
-                executed_calls.append(f"{tc.name}({args_str})")
+                executed_calls.append((loops_run, f"{tc.name}({args_str})"))
 
         logger.error("Agentic loop exhausted maximum %s iterations without the LLM finishing tool execution", _MAX_AGENTIC_LOOPS)
         return "Execution stopped due to max number of iterations reached."

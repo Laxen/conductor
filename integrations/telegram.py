@@ -18,13 +18,15 @@ def _md_to_html(text: str) -> str:
     """Convert standard markdown to Telegram-compatible HTML."""
     parts = []
     last_end = 0
-    code_pattern = re.compile(r'```(?:\w+)?\n?([\s\S]*?)```|`([^`\n]+)`')
-    for match in code_pattern.finditer(text):
+    block_pattern = re.compile(r'```(?:\w+)?\n?([\s\S]*?)```|`([^`\n]+)`|^>>>\n([\s\S]*?)\n<<<$', re.MULTILINE)
+    for match in block_pattern.finditer(text):
         parts.append(_convert_inline(text[last_end:match.start()]))
         if match.group(1) is not None:
             parts.append(f'<pre>{_html.escape(match.group(1).strip())}</pre>')
-        else:
+        elif match.group(2) is not None:
             parts.append(f'<code>{_html.escape(match.group(2))}</code>')
+        else:
+            parts.append(f'<blockquote expandable>{_html.escape(match.group(3))}</blockquote>')
         last_end = match.end()
     parts.append(_convert_inline(text[last_end:]))
     return ''.join(parts)
