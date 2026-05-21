@@ -172,10 +172,24 @@ class MemoryStore:
         return [_row_to_memory(r) for r in rows]
 
     def get_by_date_range(self, start_date: str, end_date: str) -> list[Memory]:
+        # When end_date is a plain date (YYYY-MM-DD), append "~" so that datetime
+        # values on that day (e.g. "2026-05-21T14:30") are included in the range.
+        # "~" sorts after all digits and letters in ASCII, so "2026-05-21~" is
+        # greater than any "2026-05-21T..." string.
+        upper = end_date if len(end_date) > 10 else end_date + "~"
         with self._conn() as c:
             rows = c.execute(
                 "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date >= ? AND due_date <= ? ORDER BY due_date ASC",
-                (start_date, end_date),
+                (start_date, upper),
+            ).fetchall()
+        return [_row_to_memory(r) for r in rows]
+
+    def get_due_at(self, minute_str: str) -> list[Memory]:
+        """Return entries whose due_date exactly matches the given 'YYYY-MM-DDTHH:MM' string."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, raw_text, due_date, location, tag FROM memories WHERE due_date = ?",
+                (minute_str,),
             ).fetchall()
         return [_row_to_memory(r) for r in rows]
 
@@ -234,6 +248,15 @@ class MemoryStore:
             logger.info("Score: %s, ID: %s, Memory: %s, Due Date: %s, Location: %s, Tag: %s", score, memory_id, text, due_date, location, tag)
 
         return [Memory(id=memory_id, raw_text=text, due_date=due_date, location=location, tag=tag) for score, memory_id, text, due_date, location, tag in scored[:k]]
+
+
+def _format_entry(memory: "Memory") -> str:
+    """Format a memory entry for display, prepending HH:MM when due_date includes a time."""
+    prefix = ""
+    if memory.due_date and len(memory.due_date) > 10:
+        # due_date is "YYYY-MM-DDTHH:MM" — extract the time part
+        prefix = memory.due_date[11:16] + " "
+    return f"{prefix}{memory.raw_text}{memory.metadata.display()}"
 
 
 class MemoryApp:
@@ -446,7 +469,7 @@ class MemoryApp:
 
         overdue = self.store.get_overdue(today_str)
         if overdue:
-            lines = [f"• {m.raw_text}{m.metadata.display()}" for m in overdue]
+            lines = [f"• {_format_entry(m)}" for m in overdue]
             sections.append("Overdue\n" + "\n".join(lines))
 
         day_labels = ["Today", "Tomorrow"] + [
@@ -456,7 +479,7 @@ class MemoryApp:
             day_str = (today + timedelta(days=i)).isoformat()
             entries = self.store.get_by_date_range(day_str, day_str)
             if entries:
-                lines = [f"• {m.raw_text}{m.metadata.display()}" for m in entries]
+                lines = [f"• {_format_entry(m)}" for m in entries]
                 sections.append(f"{label}\n" + "\n".join(lines))
 
         if not sections:
