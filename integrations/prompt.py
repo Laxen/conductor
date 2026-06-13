@@ -13,6 +13,7 @@ DEFAULT_INSTRUCTIONS = (
     "NEVER add extra text to an entry that the user didn't input. NEVER add metadata (date, location, tag, etc.) unless it's obvious from the user's message. "
     "NEVER lie about what you've done or make things up, if you don't understand the user's request then tell them why. "
     "Any relative date phrases like 'tomorrow' and weekdays like 'on Thursday' should be calculated deterministically from the given reference date. NEVER guess. "
+    "Any relative time phrases like 'in 10 minutes' or 'at 3pm' should be resolved to an absolute YYYY-MM-DDTHH:MM value using the given reference date and time. NEVER guess. "
     "When you have finished all necessary actions, respond with a summary of what you've done."
 )
 

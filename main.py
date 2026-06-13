@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable
 
 from functions.briefing import BriefingFunction
+from functions.scheduler import SchedulerFunction
 from integrations.memory import MemoryApp, MemoryStore
 from integrations.openai import OpenAIIntegration
 from integrations.prompt import PromptStore
@@ -30,6 +31,9 @@ async def main():
     webhook_port = int(get_env("WEBHOOK_PORT"))
     webhook = WebhookIntegration(store, telegram.send_message, webhook_port)
     await webhook.start()
+
+    scheduler = SchedulerFunction(store)
+    asyncio.create_task(scheduler.run(telegram.send_message))
 
     def on_message(text: str, confirm_fn: Callable[[str, dict], bool]) -> str | None:
         if text.strip().lower() == "brief":

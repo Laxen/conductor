@@ -59,7 +59,7 @@ class OpenAIIntegration:
                     "type": "object",
                     "properties": {
                         "text": {"type": "string", "description": "The text content of the entry."},
-                        "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format (optional)."},
+                        "due_date": {"type": "string", "description": "Due date in YYYY-MM-DD format, or YYYY-MM-DDTHH:MM when a specific time is mentioned (optional)."},
                         "location": {"type": "string", "description": "Location associated with the entry (optional)."},
                         "tag": {"type": "string", "description": tag_desc},
                     },
@@ -79,8 +79,8 @@ class OpenAIIntegration:
                     "type": "object",
                     "properties": {
                         "text": {"type": "string", "description": "Free text query for semantic similarity search. NEVER combine multiple unrelated strings in one call, instead prefer calling get_entries multiple times (optional)."},
-                        "due_date_start": {"type": "string", "description": "Start of due date range in YYYY-MM-DD format (optional)."},
-                        "due_date_end": {"type": "string", "description": "End of due date range in YYYY-MM-DD format (optional)."},
+                        "due_date_start": {"type": "string", "description": "Start of due date range in YYYY-MM-DD or YYYY-MM-DDTHH:MM format (optional)."},
+                        "due_date_end": {"type": "string", "description": "End of due date range in YYYY-MM-DD or YYYY-MM-DDTHH:MM format (optional)."},
                         "location": {"type": "string", "description": "Filter by location (optional)."},
                         "tag": {"type": "string", "description": "Filter by tag/category (optional)."},
                     },
@@ -99,7 +99,7 @@ class OpenAIIntegration:
                     "properties": {
                         "id": {"type": "string", "description": "The id of the entry to update, obtained from get_entries."},
                         "new_text": {"type": "string", "description": "The new text content for the entry."},
-                        "due_date": {"type": "string", "description": "New due date in YYYY-MM-DD format (optional)."},
+                        "due_date": {"type": "string", "description": "New due date in YYYY-MM-DD or YYYY-MM-DDTHH:MM format (optional)."},
                         "location": {"type": "string", "description": "New location (optional)."},
                         "tag": {"type": "string", "description": "New tag/category (optional)."},
                     },
@@ -128,7 +128,7 @@ class OpenAIIntegration:
         """Call the LLM with tools and the full conversation history. Returns the raw response."""
         now = datetime.now().astimezone()
         tools = self._build_tools(available_tags)
-        full_instructions = instructions + f"\nReference date: {now.date()} ({now.strftime('%A')})."
+        full_instructions = instructions + f"\nReference date: {now.date()} ({now.strftime('%A')}). Reference time: {now.strftime('%H:%M')}."
 
         logger.info("[LLM][tool_call][request] model=%s\nconversation_length=%s", self.intent_model, len(conversation))
 
